@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calcium Imaging (GCaMP)</title>
+<style>
+  :root{ --bg:#fbf7f7; --line:#e7dada; --ink:#241a1c; --muted:#6b5b5e; --teal:#0b7285; }
+  *{ box-sizing:border-box; }
+  body{ font-family:system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; color:var(--ink); background:var(--bg); }
+  header{ background:linear-gradient(180deg,#0a2b30,#0e3b42); color:#fff; padding:14px 20px; display:flex; align-items:center; gap:14px; }
+  header h1{ font-size:1.15rem; margin:0; font-weight:600; }
+  main{ max-width:1080px; margin:0 auto; padding:18px 20px 80px; }
+  a{ color:var(--teal); text-decoration:none; } a:hover{ text-decoration:underline; }
+  .muted{ color:var(--muted); } .sm{ font-size:.85rem; } .hidden{ display:none; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:11px; padding:14px 16px; margin-bottom:14px; }
+  .step{ font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; color:var(--teal); font-weight:700; margin-bottom:8px; }
+  label{ display:block; font-size:.8rem; color:var(--muted); margin-bottom:3px; }
+  input,select,textarea{ padding:7px 9px; border:1px solid #cbbcbe; border-radius:7px; font-size:.9rem; font-family:inherit; }
+  input[type=text],input[type=search]{ width:100%; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+  .btn{ background:var(--teal); color:#fff; border:0; border-radius:8px; padding:9px 15px; font-weight:600; cursor:pointer; }
+  .btn.sec{ background:#fff; color:var(--teal); border:1px solid var(--teal); } .btn.sm{ padding:5px 10px; font-size:.82rem; }
+  .btn:disabled{ opacity:.5; cursor:default; }
+  table{ width:100%; border-collapse:collapse; font-size:.86rem; } th,td{ text-align:left; padding:5px 7px; border-bottom:1px solid #f0e7e8; vertical-align:middle; }
+  td input,td select{ padding:4px 6px; font-size:.82rem; }
+  tr.bad{ background:#fef6f5; }
+  .pick{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  .badge{ font-size:.72rem; padding:2px 9px; border-radius:999px; background:#d7ecf1; color:var(--teal); }
+  .b-Queued{ background:#fff3e0; color:#8b6914; } .b-Running{ background:#d7ecf1; color:#0b7285; }
+  .b-Done{ background:#e6f4ea; color:#1e6b34; } .b-Failed,.b-Cancelled{ background:#fce8e6; color:#9a2a2a; }
+  .tag{ display:inline-block; width:16px; height:16px; line-height:16px; text-align:center; border-radius:50%; font-size:.7rem; color:#fff; }
+  .tag.ok{ background:#1e6b34; } .tag.bad{ background:#c2410c; }
+  .canon{ font-family:ui-monospace,Menlo,monospace; font-size:.78rem; }
+  .warn{ color:#9a2a2a; font-size:.7rem; } .ok{ color:#1e6b34; }
+  #guide h3.gh{ font-size:.92rem; margin:15px 0 4px; color:#3a3a55; }
+  #guide .gtab{ border-collapse:collapse; width:100%; margin-top:4px; }
+  #guide .gtab th,#guide .gtab td{ border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top; }
+  #guide .gtab th{ background:#f2f2f8; }
+  .optbox{ border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fcfcff; }
+  .opt-h{ font-weight:700; font-size:.95rem; margin-bottom:2px; color:#2a2a40; }
+  .opt-tag{ background:var(--teal); color:#fff; font-size:.68rem; font-weight:700; padding:2px 8px; border-radius:999px; margin-right:6px; vertical-align:middle; }
+  .or-divider{ display:flex; align-items:center; text-align:center; color:var(--muted); font-size:.78rem; margin:12px 0; }
+  .or-divider::before,.or-divider::after{ content:""; flex:1; border-top:1px solid var(--line); }
+  .or-divider span{ padding:0 12px; text-transform:uppercase; letter-spacing:.06em; }
+  #guide ol.sm li,#guide ul.sm li{ margin:4px 0; }
+  #guide code{ background:#ececf3; padding:0 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<header><h1>📈 Calcium Imaging (GCaMP)</h1></header>
+<main>
+  <p class="muted sm" style="margin-top:0"><a href="#" id="home-link">← lab home</a></p>
+  <div id="loading" class="muted">Loading…</div>
+  <div id="app" class="hidden">
+    <p class="sm muted" style="margin-top:0">Upload raw calcium movies (with their <b>snap</b> stills where you have them) and submit. The platform runs <b>Suite2p</b> (registration + ROI detection — Cellpose on the snap, or Suite2p's own detector when there's no snap), applies the trained <b>ROI + spike</b> classifiers, reports event kinetics and neuron grouping, and writes results back to this experiment, auditable and reproducible. Movies are renamed to the lab convention and archived in the cloud.</p>
+
+    <details id="guide" open style="margin:10px 0 14px;border:1px solid var(--line);border-radius:10px;background:#fbfbfe">
+      <summary style="cursor:pointer;padding:12px 14px;font-weight:600">📖 How to use this tool — read me first</summary>
+      <div style="padding:2px 16px 16px">
+        <p class="sm">This tool does two jobs in one pass: it <b>stores your calcium movies in the lab cloud</b> (durable, searchable, backed up) and <b>runs the full GCaMP analysis</b> on the GPU platform — Suite2p registration and ROI detection, then the trained ROI + spike classifiers, event kinetics, and neuron grouping. You never attach anything in eLabFTW by hand, and you don't need the separate image-upload tool — uploading here archives the data for you too.</p>
+
+        <h3 class="gh">A · Step by step</h3>
+        <ol class="sm">
+          <li><b>Pick the experiment</b> (Step 1). Click the box to browse a dropdown of every experiment, or type part of the title or the <code>#id</code> to filter. Completed studies are hidden unless you tick "include completed studies."</li>
+          <li><b>Add your recordings</b> (Step 2). First pick the <b>Preparation</b>: <b>In vitro</b> (culture — no animal/eye) or <b>In vivo</b> (animal). Then add individual movie files + their <b>snap</b> stills, <b>or pick a whole folder</b> — nested structure is fine and movies are paired with their snaps automatically (<code>rec1.tif</code> ↔ <code>rec1_snap.tif</code>, <b>TIFF only</b>). <i>In vitro:</i> recording IDs come from the file/folder path and region/timepoint/treatment are optional — nothing per-file is required, which keeps bulk uploads quick. <i>In vivo:</i> <b>Animal ID is required</b> and each movie is renamed to <code>animal_eye_region_timepoint_treatment_date_NN</code>. Movies are archived to the lab cloud (leave "Save to the lab image archive" ticked). <b>Option B</b>: to re-analyze movies already uploaded to this experiment, skip the file pickers and tick them in "Use movies already in this experiment" — no re-uploading, and snaps are matched from the archive automatically. A movie with <b>no snap still runs</b> — Suite2p uses its own ROI detector instead of Cellpose for that recording.</li>
+          <li><b>Set the Suite2p options</b> (Step 3) — usually leave the defaults; set <b>fs</b> to your true acquisition frame rate.</li>
+          <li><b>Set the analysis options</b> (Step 4). Pick the <b>model pair</b> that matches how the data were acquired and the <b>sensor</b> you used; leave grouping on correlation unless you have a reason to change it.</li>
+          <li><b>Submit</b>. The run is queued; the GPU platform pulls your movies from the cloud, runs Suite2p then the classifiers, and writes the results back automatically. Nothing else for you to do.</li>
+          <li><b>Find your results</b> under <b>"Recent analyses on this experiment"</b> at the bottom. Each run shows its status (Queued → Running → Done). When Done, click <b>Files ▾</b> to view or download the results right here — a per-recording <b>Excel metrics workbook</b>, correlation/grouping <b>plots</b>, and a portable <b>results bundle</b> — individually or all at once (<b>open</b> still takes you to the full record in eLabFTW). Always glance at the segmentation/QC overlay first.</li>
+        </ol>
+
+        <h3 class="gh">B · What each setting means (and when to change it)</h3>
+        <table class="gtab sm">
+          <tr><th>Setting</th><th>What it does</th><th>When you'd change it</th></tr>
+          <tr><td><b>Settings profile</b></td><td>A validated Suite2p configuration bundle (registration + detection defaults).</td><td>Switch only when a new profile is added for a different acquisition scope.</td></tr>
+          <tr><td><b>fs (Hz)</b></td><td>Acquisition frame rate. Drives event kinetics and deconvolution.</td><td>Always set to your recording's true frame rate.</td></tr>
+          <tr><td><b>Cellpose model</b></td><td>The segmentation network applied to the <i>snap</i> still. <code>cpdino_RGC-Snap</code> is fine-tuned on retinal ganglion-cell snaps.</td><td>Match the model to what your snap looks like; use a retinal model for RGCs.</td></tr>
+          <tr><td><b>Diameter (px)</b></td><td>Expected cell diameter for Cellpose. <b>Leave blank</b> and Cellpose infers it automatically.</td><td>Enter a number only if auto-sizing under- or over-segments; measure a few cells in Fiji.</td></tr>
+          <tr><td><b>Cell-prob threshold</b></td><td>How confident a pixel must be to count as part of a cell. Lower = more/larger ROIs. Default 0.0.</td><td>Lower to recover dim cells; raise to drop faint/background objects.</td></tr>
+          <tr><td><b>Flow threshold</b></td><td>Strictness of mask shape (max allowed flow error). Higher = more, looser masks. Default 0.4.</td><td>Raise toward 0.6 if real cells are missed; lower toward 0.2 for spurious blobs.</td></tr>
+          <tr><td><b># channels / Functional channel</b></td><td>Acquisition channel count and which channel carries the GCaMP signal.</td><td>Set for multi-channel acquisitions.</td></tr>
+          <tr><td><b>Model pair</b></td><td>Which trained ROI + spike classifier set is applied — <code>15 Hz in-vitro</code> vs <code>3 Hz in-vivo</code>.</td><td>Match to the acquisition context. <b>Never mix</b> — kinetics are frame-rate- and indicator-specific.</td></tr>
+          <tr><td><b>Sensor</b></td><td>The GCaMP variant, which sets the expected transient kinetics.</td><td>Set to the indicator you imaged (e.g. GCaMP6s vs 8s).</td></tr>
+          <tr><td><b>Grouping</b></td><td>How co-active neurons are clustered — correlation, weighted correlation, STTC, <b>combined (STTC + correlation)</b>, or none.</td><td>STTC is more robust to firing-rate differences; "combined" uses both together; "none" skips grouping.</td></tr>
+          <tr><td><b>Dry-run</b></td><td>Validates the inputs and config without running the full analysis.</td><td>Use to check a batch will parse before committing GPU time.</td></tr>
+        </table>
+
+        <h3 class="gh">C · Understanding the output numbers</h3>
+        <p class="sm">For each recording the workbook reports per-ROI <b>event metrics</b> (event rate, amplitude, and kinetics) after the trained <b>ROI</b> classifier keeps active cells and the <b>spike</b> classifier keeps real transients, plus neuron <b>grouping / co-activity</b> matrices and plots. Treat detected events as <i>candidate transients</i>, and interpret kinetics in an indicator- and frame-rate-aware way — this is why the model pair and <b>fs</b> must match the acquisition, and why you should never compare across mismatched acquisition contexts. Always glance at the segmentation/QC overlay first: good-looking metrics are meaningless if the ROIs landed on the wrong structures.</p>
+
+        <p class="sm muted">References: Pachitariu et al., <i>bioRxiv</i> 061507 (2017) — Suite2p; Stringer et al., <i>Nat Methods</i> 18:100 (2021) — Cellpose; Dombeck et al., <i>Neuron</i> 56:43 (2007) — ΔF/F baseline; Friedrich et al., <i>PLoS Comput Biol</i> 13:e1005423 (2017) — OASIS; Rupprecht et al., <i>Nat Neurosci</i> 24:1324 (2021) — CASCADE.</p>
+      </div>
+    </details>
+
+    <div class="card">
+      <div class="step">Step 1 — Experiment</div>
+      <div><label>Pick the experiment this analysis belongs to</label>
+        <input type="search" id="exp-q" placeholder="click to browse all, or type a title / #id to filter…" autocomplete="off">
+        <label class="sm" style="display:inline-flex;align-items:center;gap:5px;margin-top:4px;cursor:pointer"><input type="checkbox" id="gc-showdone" style="width:auto;margin:0"> include completed studies</label>
+        <div id="exp-pick" class="pick hidden" style="margin-top:6px"></div></div>
+      <div id="exp-chosen" class="sm" style="margin-top:6px"></div>
+    </div>
+
+    <div id="rest" class="hidden">
+      <div class="card">
+        <div class="step">Step 2 — Recordings (movies + snaps)</div>
+        <div class="sm muted" style="margin-bottom:10px">Two ways to choose recordings — <b>upload new movies</b>, or <b>pick movies already in this experiment's cloud archive</b>.</div>
+        <div class="row" style="margin-bottom:10px">
+          <div><label>Preparation</label><select id="prep"><option value="invitro">In vitro (culture — no animal/eye)</option><option value="invivo">In vivo (animal)</option></select></div>
+          <div><label>Acquisition date</label><input type="date" id="s-date"></div>
+        </div>
+
+        <div class="optbox">
+          <div class="opt-h"><span class="opt-tag">Option A</span> Upload new movies</div>
+          <div class="row" style="margin:6px 0 8px">
+            <div><label>Movie files (raw calcium recordings — <b>TIFF</b>)</label><input type="file" id="mv-files" multiple accept=".tif,.tiff"></div>
+            <div><label>Snap stills — optional, <b>TIFF</b></label><input type="file" id="snap-files" multiple accept=".tif,.tiff"></div>
+            <div><label>…or a whole folder (nested OK)</label><input type="file" id="folder-files" webkitdirectory directory multiple></div>
+            <div><button class="btn sec sm" id="apply-all" type="button" title="Copy the first row's metadata to every row">Apply row 1 → all</button></div>
+            <div><button class="btn sec sm" id="mv-clear" type="button">Clear</button></div>
+          </div>
+          <div class="sm muted" style="margin-bottom:6px">Add individual movies + snaps, <b>or</b> pick a folder — nested structure is fine; movies and their snaps are found automatically. Snaps pair by name (<code>rec1.tif</code> ↔ <code>rec1_snap.tif</code>). No snap ⇒ Suite2p uses its own ROI detector. Movies are saved to the lab cloud archive under the naming convention. <span id="s2-hint"></span></div>
+          <div id="rec-table"></div>
+          <label class="sm" style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer"><input type="checkbox" id="gc-archive" checked style="width:auto;margin:0"> Save these movies to the lab image archive (searchable + backed up)</label>
+        </div>
+
+        <div class="or-divider"><span>or</span></div>
+
+        <div class="optbox">
+          <div class="opt-h"><span class="opt-tag">Option B</span> Use movies already in this experiment</div>
+          <div class="sm muted" style="margin:2px 0 8px">Every calcium movie previously uploaded to this experiment is listed below. Tick the ones to analyze — no re-uploading. Snap stills are matched automatically from the archive. (Used when you don't upload anything in Option A.)</div>
+          <div id="img-pick" class="pick"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="step">Step 3 — Suite2p (registration + ROI detection)</div>
+        <div class="row">
+          <div><label>Settings profile</label><select id="p-profile"><option value="2D_invitro_olympus">2D in-vitro (Olympus)</option></select></div>
+          <div><label>Frame rate fs (Hz)</label><input type="text" id="p-fs" value="15" style="width:90px"></div>
+          <div><label>Cellpose model (snap segmentation)</label><select id="p-cpmodel"><option value="cpdino_RGC-Snap">cpdino_RGC-Snap</option><option value="cpdino_RPBMS">cpdino_RPBMS</option><option value="cpdino_BRN3A">cpdino_BRN3A</option></select></div>
+          <div><label>Cell diameter (px)</label><input type="text" id="p-diam" value="" placeholder="auto" title="Leave blank to let Cellpose infer the diameter automatically" style="width:90px"></div>
+          <div><label>Cell-prob threshold</label><input type="text" id="p-cellprob" value="0.0" style="width:90px" title="lower = more ROIs"></div>
+          <div><label>Flow threshold</label><input type="text" id="p-flow" value="0.4" style="width:90px"></div>
+          <div><label># channels</label><input type="number" id="p-nch" min="1" value="1" style="width:70px"></div>
+          <div><label>Functional channel</label><input type="number" id="p-func" min="1" value="1" style="width:80px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="step">Step 4 — Analysis (ROI + spike classifiers, grouping)</div>
+        <div class="row">
+          <div><label>Model pair (acquisition context)</label><select id="a-model"><option value="15hz_invitro_base">15 Hz in-vitro</option><option value="3hz_invivo_base">3 Hz in-vivo</option></select></div>
+          <div><label>Sensor</label><select id="a-sensor"><option>gcamp6s</option><option>gcamp6f</option><option>gcamp8s</option><option>generic</option></select></div>
+          <div><label>Neuron grouping</label><select id="a-group"><option value="corr">correlation</option><option value="wcorr">weighted correlation</option><option value="sttc">STTC</option><option value="combined">combined (STTC + correlation)</option><option value="none">none</option></select></div>
+          <div><label>Dry-run (validate only)</label><select id="a-dry"><option value="false">no — run</option><option value="true">yes</option></select></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items:center"><button class="btn" id="submit">Upload &amp; submit analysis</button><span id="msg" class="muted"></span></div>
+        <div id="prog" class="sm muted" style="margin-top:8px"></div>
+        <details style="margin-top:10px"><summary class="sm muted" style="cursor:pointer">Preview the job JSON</summary>
+          <pre id="jobprev" class="sm" style="background:#f4f9fa;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;max-height:280px"></pre></details>
+      </div>
+    </div>
+
+    <div class="card"><div class="step">Recent analyses on this experiment</div><div id="runs" class="sm muted">Pick an experiment to see its analysis history.</div></div>
+  </div>
+</main>
+
+<script src="/results-viewer.js?v=1"></script>
+<script>
+/* ============================ CONFIGURE FOR YOUR LAB ============================
+ * Every lab-specific value lives here. See docs/adapting-to-your-lab.md.
+ * Serve this page from your ELN so it shares the authenticated browser session. */
+const CONFIG = {
+  API:             '/api/v2',                     // your ELN REST API base
+  UPLOAD_URL:      '/blobapi/upload',             // your upload-relay endpoint
+  BLOB_CONTAINER:  'microscopy',                  // object-store container / bucket
+  RUNS_STORE:      'Analysis runs',               // ELN record type holding runs
+  DATA_STORE:      'Data files',                  // ELN record type: uploaded-file archive
+  TEAM_NAME:       'your lab',                    // team/group allowed to use the tool
+  RECORD_VIEW_URL: '/database.php?mode=view&id=', // ELN "open record" URL prefix
+  HOME_URL:        '/dashboard.html'              // link back to your lab home page
+};
+/* ============================================================================= */
+const API=CONFIG.API;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const today=()=>new Date().toISOString().slice(0,10);
+const nameSlug=s=>String(s==null?'':s).trim().replace(/\s+/g,'-').replace(/[^A-Za-z0-9\-+]/g,'').replace(/^[.\-]+|[.\-]+$/g,'');
+async function api(method,path,body){ const opts={method,headers:{'Accept':'application/json'}}; if(body){ opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); } const r=await fetch(API+path,opts); const t=await r.text(); let d=null; try{ d=t.trim()?JSON.parse(t):null; }catch(e){} return {status:r.status,data:d,location:r.headers.get('Location')}; }
+const idFromLoc=l=>{ if(!l) return null; const t=String(l).replace(/\/+$/,'').split('/').pop(); return /^\d+$/.test(t)?+t:null; };
+async function newItem(typeId){ const cr=await api('POST','/items/'+typeId,{}); let nid=idFromLoc(cr.location)||(cr.data&&cr.data.id)||null; if(nid) setTimeout(async()=>{ try{ const it=(await api('GET','/items/'+nid)).data; if(it && !it.category && (!it.title||/^untitled$/i.test(String(it.title).trim()))) await api('DELETE','/items/'+nid); }catch(e){} },25000); return nid; }
+const meta=it=>{ try{ return JSON.parse(it.metadata||'{}'); }catch(e){ return {}; } };
+const flds=m=>(m.extra_fields)||{}; const fv=(e,n)=>{ const f=e&&e[n]; return f?(f.value||''):''; };
+const TEAMPERM=JSON.stringify({base:30,teams:[],teamgroups:[],users:[]});
+const numOrNull=v=>{ v=String(v==null?'':v).trim(); return v===''?null:(isNaN(+v)?null:+v); };
+const MOVIE_EXT=/\.(ome\.tif|tif|tiff|h5|hdf5|nd2|sbx|raw|bin)$/i;
+let ME='', RUN_TID=null, RUN_CAT=null, DATA_TID=null, DATA_CAT=null, EXPS=[], EXP=null, RECS=[], ARCHIVE=[], ARCH_SNAP={};
+
+function stemOf(name){ return String(name||'').replace(MOVIE_EXT,'').replace(/\.[^.]+$/,''); }
+function extOf(name){ const m=String(name||'').match(/\.([^.]+)$/); return m?m[1].toLowerCase():'tif'; }
+
+/* ---------- Step 1: browse-all experiment dropdown (ported from colocalization.html) ---------- */
+function isCompletedExp(e){ return /data collection complete|analysis complete/i.test(e.status_title||''); }
+function renderExpPick(q){
+  const box=$('#exp-pick'); const ql=(q||'').toLowerCase().trim();
+  const showDone=$('#gc-showdone')&&$('#gc-showdone').checked;
+  let list=EXPS.filter(e=>(showDone||!isCompletedExp(e)));
+  if(ql) list=list.filter(e=>String(e.id)===ql || String(e.title||'').toLowerCase().includes(ql));
+  list=list.slice().sort((a,b)=>b.id-a.id);
+  const capped=list.slice(0,200);
+  box.innerHTML = capped.length
+    ? capped.map(e=>`<div data-eid="${e.id}" style="padding:4px 4px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='#eef'" onmouseout="this.style.background=''">#${e.id} · ${esc(e.title||'(untitled)')}${isCompletedExp(e)?(' · ✔ '+esc(e.status_title)):''}</div>`).join('')
+      + (list.length>capped.length?`<div class="muted sm" style="padding:4px">…and ${list.length-capped.length} more — type to filter.</div>`:'')
+    : '<div class="muted sm" style="padding:4px">No matches.</div>';
+  box.classList.remove('hidden');
+  box.querySelectorAll('[data-eid]').forEach(d=>d.onclick=()=>chooseExp(+d.dataset.eid));
+}
+async function chooseExp(id){
+  $('#exp-pick').classList.add('hidden');
+  const full=(await api('GET','/experiments/'+id)).data; if(!full) return;
+  EXP={id:full.id, title:full.title};
+  $('#exp-q').value='#'+full.id+' · '+(full.title||'');
+  $('#exp-chosen').innerHTML='<span class="badge">experiment #'+full.id+'</span> <b>'+esc(full.title||'')+'</b>';
+  $('#rest').classList.remove('hidden'); renderRecTable(); loadArchive(); renderRuns(); previewJob();
+}
+
+/* ---------- Step 2: intake + naming (in vivo canonical / in vitro path-based) ---------- */
+const prep=()=>($('#prep')&&$('#prep').value)||'invitro';
+const relStem=rel=>String(rel||'').replace(/\.[^.]+$/,'');
+const baseName=rel=>String(rel||'').split('/').pop();
+function updateHint(){ const h=$('#s2-hint'); if(!h) return;
+  h.innerHTML = prep()==='invivo'
+    ? 'Each movie is renamed to <code>animal_eye_region_timepoint_treatment_date_NN</code> — <b>Animal ID is required</b>.'
+    : 'Recording IDs come from the file / folder path; animal &amp; eye are not used. Region / timepoint / treatment are optional.'; }
+function rebuildRecs(){
+  const mv=[], sn=[];
+  [...($('#mv-files').files||[])].forEach(f=>{ if(/\.(tif|tiff)$/i.test(f.name)) mv.push({file:f, rel:f.name}); });
+  [...($('#snap-files').files||[])].forEach(f=>sn.push({file:f, rel:f.name}));
+  [...($('#folder-files').files||[])].forEach(f=>{ const rel=f.webkitRelativePath||f.name; if(!/\.(tif|tiff)$/i.test(rel)) return; (/_snap\.(tif|tiff)$/i.test(rel)?sn:mv).push({file:f, rel}); });
+  const snapFull={}, snapBase={};
+  sn.forEach(s=>{ const st=relStem(s.rel).replace(/_snap$/i,''); snapFull[st.toLowerCase()]=s.file; snapBase[baseName(st).toLowerCase()]=s.file; });
+  const prev={}; RECS.forEach(r=>{ prev[r.rel]=r.meta; });
+  mv.sort((a,b)=>a.rel.localeCompare(b.rel));
+  RECS = mv.map((m,i)=>{ const full=relStem(m.rel).toLowerCase(), base=baseName(relStem(m.rel)).toLowerCase();
+    return { movie:m.file, rel:m.rel, snap: snapFull[full]||snapBase[base]||null,
+             meta: prev[m.rel] || {animal_id:'',eye:'',region:'',timepoint:'',treatment:'',index:String(i+1)} }; });
+  renderRecTable(); previewJob();
+}
+function canonStem(r){
+  const p=[nameSlug(r.meta.animal_id)||'unknown'];
+  if(r.meta.eye) p.push(r.meta.eye);
+  if(r.meta.region) p.push(nameSlug(r.meta.region));
+  if(r.meta.timepoint) p.push(nameSlug(r.meta.timepoint));
+  if(r.meta.treatment) p.push(nameSlug(r.meta.treatment));
+  p.push(($('#s-date').value||today()).replace(/-/g,''));
+  p.push(String(r.meta.index||'1').replace(/\D/g,'').padStart(2,'0'));
+  return p.join('_');
+}
+function recId(r,i){ return prep()==='invivo' ? canonStem(r)
+  : (nameSlug(relStem(r.rel).replace(/[\/\\]+/g,'-'))||('rec'+String((i||0)+1).padStart(2,'0'))); }
+function movieUploadName(r,i){ return prep()==='invivo' ? (canonStem(r)+'.'+extOf(r.movie.name)) : baseName(r.rel); }
+function snapUploadName(r,i){ return recId(r,i)+'_snap.tif'; }
+function rowWarn(r){ const w=[];
+  if(prep()==='invivo' && !nameSlug(r.meta.animal_id)) w.push('Animal ID required');
+  if(!/\.(tif|tiff)$/i.test(r.movie.name)) w.push('movie must be TIFF');
+  if(r.snap && !/\.(tif|tiff)$/i.test(r.snap.name)) w.push('snap must be TIFF');
+  return w; }
+function renderRecTable(){
+  const box=$('#rec-table');
+  if(!RECS.length){ box.innerHTML='<div class="muted sm">No movies chosen yet.</div>'; if($('#submit'))$('#submit').disabled=true; return; }
+  const vivo=prep()==='invivo';
+  const ids=RECS.map((r,i)=>recId(r,i)); const dup={}; ids.forEach(s=>dup[s]=(dup[s]||0)+1);
+  const hdr = vivo
+    ? '<tr><th></th><th>Movie</th><th>Snap</th><th>Animal / Rat ID</th><th>Eye</th><th>Region</th><th>Timepoint</th><th>Treatment</th><th>#</th><th>Canonical name</th></tr>'
+    : '<tr><th></th><th>Recording (from path)</th><th>Movie</th><th>Snap</th><th>Region</th><th>Timepoint</th><th>Treatment</th></tr>';
+  let okN=0;
+  box.innerHTML='<table>'+hdr+RECS.map((r,i)=>{
+    const w=rowWarn(r); if(!w.length) okN++;
+    if(dup[ids[i]]>1) w.push('duplicate recording ID');
+    const snapCell = r.snap ? (/\.(tif|tiff)$/i.test(r.snap.name)?'<span class="ok">✓ '+esc(baseName(r.snap.name))+'</span>':'<span class="warn">'+esc(r.snap.name)+' ⚠</span>') : '<span class="muted">none</span>';
+    const sz='<span class="muted">'+((Math.round((r.movie.size||0)/1048576*10)/10)||'?')+' MB</span>';
+    const wl=w.length?('<div class="warn">'+w.map(esc).join('; ')+'</div>'):'';
+    if(vivo){ const eye=['','OD','OS','OU'].map(o=>`<option${r.meta.eye===o?' selected':''}>${o}</option>`).join('');
+      return `<tr class="${w.length?'bad':''}" data-i="${i}">
+        <td><span class="tag ${w.length?'bad':'ok'}">${w.length?'!':'✓'}</span></td>
+        <td class="sm">${esc(baseName(r.rel))}<br>${sz}</td>
+        <td class="sm">${snapCell}</td>
+        <td><input type="text" data-k="animal_id" value="${esc(r.meta.animal_id)}" style="width:100px"></td>
+        <td><select data-k="eye" style="width:64px">${eye}</select></td>
+        <td><input type="text" data-k="region" value="${esc(r.meta.region)}" style="width:84px"></td>
+        <td><input type="text" data-k="timepoint" value="${esc(r.meta.timepoint)}" style="width:84px"></td>
+        <td><input type="text" data-k="treatment" value="${esc(r.meta.treatment)}" style="width:90px"></td>
+        <td><input type="text" data-k="index" value="${esc(r.meta.index)}" style="width:40px"></td>
+        <td class="canon">${esc(movieUploadName(r,i))}${wl}</td></tr>`; }
+    return `<tr class="${w.length?'bad':''}" data-i="${i}">
+      <td><span class="tag ${w.length?'bad':'ok'}">${w.length?'!':'✓'}</span></td>
+      <td class="canon">${esc(ids[i])}${wl}</td>
+      <td class="sm">${esc(baseName(r.rel))}<br>${sz}</td>
+      <td class="sm">${snapCell}</td>
+      <td><input type="text" data-k="region" value="${esc(r.meta.region)}" style="width:90px"></td>
+      <td><input type="text" data-k="timepoint" value="${esc(r.meta.timepoint)}" style="width:90px"></td>
+      <td><input type="text" data-k="treatment" value="${esc(r.meta.treatment)}" style="width:100px"></td></tr>`;
+  }).join('')+'</table>';
+  box.querySelectorAll('tr[data-i]').forEach(tr=>{ const i=+tr.dataset.i;
+    tr.querySelectorAll('input[data-k]').forEach(el=>el.oninput=()=>{ RECS[i].meta[el.dataset.k]=el.value; renderRecTable(); previewJob(); });
+    tr.querySelectorAll('select[data-k]').forEach(el=>el.onchange=()=>{ RECS[i].meta[el.dataset.k]=el.value; renderRecTable(); previewJob(); }); });
+  refreshSubmit();
+}
+
+/* ---------- Option B: movies already in this experiment's archive ---------- */
+function dfExpMatch(ef){ const ex=fv(ef,'Experiment'); if(ex==='EXP'+EXP.id) return true;
+  const serial=(String(EXP.title||'').match(/\b(\d{3,4})\b/)||[])[1]; return !!serial && ex==='EXP'+serial; }
+async function loadArchive(){
+  ARCHIVE=[]; ARCH_SNAP={};
+  if(!EXP||DATA_CAT==null){ renderArchive(); return; }
+  try{
+    const res=await api('GET','/items?cat='+DATA_CAT+'&extended=1&limit=9999'); const items=Array.isArray(res.data)?res.data:[];
+    for(const it of items){ const ef=flds(meta(it)); if(!dfExpMatch(ef)) continue;
+      const path=fv(ef,'Blob path'); if(!path) continue;
+      const name=fv(ef,'File name')||fv(ef,'Original file name')||('item '+it.id);
+      if(!/\.(tif|tiff)$/i.test(name)) continue;
+      const pointer='blob:'+(fv(ef,'Blob container')||'microscopy')+'/'+path;
+      const stem=name.replace(/\.[^.]+$/,'');
+      if(/_snap$/i.test(stem)){ ARCH_SNAP[stem.replace(/_snap$/i,'').toLowerCase()]=pointer; continue; }
+      ARCHIVE.push({recordId:it.id, name, pointer, stem, gb:parseFloat(fv(ef,'File size (GB)'))||0,
+                    animal:fv(ef,'Source animal')||'', eye:(fv(ef,'Laterality')||'').replace(/^N\/A$/i,'')}); }
+  }catch(e){}
+  ARCHIVE.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  renderArchive();
+}
+function renderArchive(){
+  const box=$('#img-pick'); if(!box) return;
+  if(!ARCHIVE.length){ box.innerHTML='<div class="muted sm">No archived calcium movies found for this experiment yet — upload some in Option A (or the image-upload tool).</div>'; return; }
+  box.innerHTML='<div class="sm muted" style="margin-bottom:4px">'+ARCHIVE.length+' archived movie(s) — tick the ones to analyze:</div>'+
+    ARCHIVE.map((a,i)=>{ const snap=ARCH_SNAP[a.stem.toLowerCase()];
+      return '<label style="display:block;padding:2px 0"><input type="checkbox" data-arch="'+i+'"> '+esc(a.name)+' <span class="muted sm">'+(a.gb?('· '+a.gb.toFixed(2)+' GB '):'')+(snap?'· ✓ snap':'· no snap')+'</span></label>'; }).join('');
+  box.querySelectorAll('[data-arch]').forEach(c=>c.onchange=()=>{ previewJob(); refreshSubmit(); });
+}
+function selectedArchive(){ return [...document.querySelectorAll('#img-pick [data-arch]:checked')].map(c=>ARCHIVE[+c.dataset.arch]).filter(Boolean); }
+function archiveRecordings(){ return selectedArchive().map((a,i)=>({ id:(nameSlug(a.stem)||('arch'+(i+1))), movie:a.pointer,
+  snap: ARCH_SNAP[a.stem.toLowerCase()]||null, metadata:{animal_id:a.animal||'', eye:a.eye||'', region:'', timepoint:'', treatment:''} })); }
+function refreshSubmit(){ const up=RECS.filter(r=>!rowWarn(r).length).length; const ar=selectedArchive().length;
+  if($('#submit')) $('#submit').disabled=(up+ar)===0; }
+
+/* ---------- job schema ---------- */
+function suite2pCfg(){ return {
+  settings_profile:$('#p-profile').value, fs:numOrNull($('#p-fs').value)??15,
+  cellpose_model:$('#p-cpmodel').value, diameter:numOrNull($('#p-diam').value),
+  cellprob_threshold:numOrNull($('#p-cellprob').value)??0.0, flow_threshold:numOrNull($('#p-flow').value)??0.4,
+  nchannels:parseInt($('#p-nch').value,10)||1, functional_chan:parseInt($('#p-func').value,10)||1 }; }
+function analysisCfg(){ return { model_pair:$('#a-model').value, sensor:$('#a-sensor').value, grouping:$('#a-group').value }; }
+function buildJob(recordings){ return { schema_version:'gcamp-1', recordings, suite2p:suite2pCfg(), analysis:analysisCfg(), execution:{ dry_run:$('#a-dry').value==='true' } }; }
+function previewJob(){
+  const recs=RECS.filter(r=>!rowWarn(r).length).map((r,i)=>({ id:recId(r,i), movie:'(upload:'+movieUploadName(r,i)+')', snap:r.snap?('(upload:'+snapUploadName(r,i)+')'):null, metadata:r.meta }));
+  archiveRecordings().forEach(a=>recs.push(a));
+  try{ $('#jobprev').textContent=JSON.stringify(buildJob(recs),null,2); }catch(e){ $('#jobprev').textContent='(incomplete)'; }
+}
+
+async function uploadFile(file, blobPath, ct){
+  const url=CONFIG.UPLOAD_URL+'?container='+encodeURIComponent(CONFIG.BLOB_CONTAINER)+'&path='+encodeURIComponent(blobPath)+'&ct='+encodeURIComponent(ct||file.type||'application/octet-stream');
+  const r=await fetch(url,{method:'POST',body:file});
+  const t=await r.text(); let d=null; try{ d=t.trim()?JSON.parse(t):null; }catch(e){}
+  if(!r.ok || !d || !d.pointer) throw new Error('upload failed for '+file.name+' (HTTP '+r.status+')');
+  return d;
+}
+async function archiveRecord(r, canonical, orig, up){
+  if(!($('#gc-archive').checked) || !DATA_TID || !DATA_CAT) return;
+  const nid=await newItem(DATA_TID); if(!nid) return;
+  const m=meta((await api('GET','/items/'+nid)).data||{}); const ef=m.extra_fields||(m.extra_fields={});
+  const set=(k,v)=>{ if(ef[k]) ef[k].value=(v==null?'':String(v)); else ef[k]={type:'text',value:(v==null?'':String(v))}; };
+  const serial=(String(EXP.title||'').match(/\b(\d{3,4})\b/)||[])[1]||EXP.id;   // match the lab archive convention (EXP0041), like the coloc/image tools
+  set('File name',canonical); set('Original file name',orig); set('Experiment','EXP'+serial);
+  set('Source animal',r.meta.animal_id); set('Laterality',r.meta.eye||'N/A'); set('Modality','Calcium imaging (GCaMP)');
+  set('Blob container',up.container||'microscopy'); set('Blob path',up.path);
+  set('File size (GB)',((r.movie.size||0)/1e9).toFixed(3)); set('Storage tier','Hot');
+  set('Uploaded by',ME); set('Upload date',today()); set('Acquisition date',$('#s-date').value||today());
+  const label=r.meta.animal_id ? (r.meta.animal_id+' calcium'+(r.meta.eye?(' '+r.meta.eye):'')) : ('calcium '+canonical);
+  const title=label+(r.meta.region?(' '+r.meta.region):'')+' ('+($('#s-date').value||today())+')';
+  await api('PATCH','/items/'+nid,{title, category:DATA_CAT, canread:TEAMPERM, canwrite:TEAMPERM, metadata:JSON.stringify(m)});
+  try{ await api('POST','/experiments/'+EXP.id+'/items_links/'+nid); }catch(e){}
+}
+
+async function submit(){ const msg=$('#msg'), prog=$('#prog');
+  if(!EXP){ msg.style.color='#9a2a2a'; msg.textContent='Pick an experiment first.'; return; }
+  const good=RECS.filter(r=>!rowWarn(r).length);
+  const arch=archiveRecordings();
+  if(!good.length && !arch.length){ msg.style.color='#9a2a2a'; msg.textContent = prep()==='invivo' ? 'Add a movie with an Animal ID, or tick an archived movie below.' : 'Add a TIFF movie, or tick an archived movie below.'; return; }
+  const allIds=good.map((r,i)=>recId(r,i)).concat(arch.map(a=>a.id));
+  if(new Set(allIds).size!==allIds.length){ msg.style.color='#9a2a2a'; msg.textContent='Two recordings resolve to the same ID — rename a file or change metadata.'; return; }
+  $('#submit').disabled=true; msg.style.color=''; msg.textContent='Uploading…';
+  try{
+    const recordings=[]; const names=[]; const pointers=[];
+    let done=0; const total=good.reduce((n,r)=>n+1+(r.snap?1:0),0);
+    for(let i=0;i<good.length;i++){ const r=good[i];
+      const id=recId(r,i); const mName=movieUploadName(r,i); const base='EXP'+EXP.id+'/calcium/'+encodeURIComponent(id)+'/';
+      prog.textContent='Uploading '+mName+' … ('+done+'/'+total+')';
+      const mup=await uploadFile(r.movie, base+mName); names.push(mName); pointers.push(mup.pointer); done++;
+      await archiveRecord(r, mName, baseName(r.rel), mup);
+      let snapPtr=null;
+      if(r.snap){ const sName=snapUploadName(r,i); prog.textContent='Uploading '+sName+' … ('+done+'/'+total+')';
+        const sup=await uploadFile(r.snap, base+sName, 'image/tiff'); names.push(sName); pointers.push(sup.pointer); snapPtr=sup.pointer; done++; }
+      recordings.push({ id, movie:mup.pointer, snap:snapPtr, metadata:r.meta });
+    }
+    for(const a of arch){ recordings.push(a); names.push(baseName(a.movie)); pointers.push(a.movie); if(a.snap) pointers.push(a.snap); }
+    prog.textContent='Creating the run record…';
+    const job=buildJob(recordings);
+    const nid=await newItem(RUN_TID); if(!nid) throw new Error('could not create the run record');
+    const m=meta((await api('GET','/items/'+nid)).data||{}); const ef=m.extra_fields||(m.extra_fields={});
+    const set=(n,v)=>{ if(ef[n]) ef[n].value=(v==null?'':String(v)); else ef[n]={type:'text',value:(v==null?'':String(v))}; };
+    set('Job type','Calcium (GCaMP)'); set('Experiment ID',EXP.id); set('Experiment title',EXP.title||'');
+    set('Submitted by',ME||''); set('Date submitted',today()); set('Config (job JSON)',JSON.stringify(job));
+    set('Input uploads',names.join(', ')); set('Source pointers',pointers.join(', ')); set('Status','Queued');
+    const title='Calcium (GCaMP) — '+(EXP.title||('exp '+EXP.id))+' — '+today();
+    const rr=await api('PATCH','/items/'+nid,{title,category:RUN_CAT||undefined,canread:TEAMPERM,canwrite:TEAMPERM,metadata:JSON.stringify(m)});
+    if(rr.status!==200) throw new Error('save failed ('+rr.status+')');
+    try{ await api('POST','/experiments/'+EXP.id+'/items_links/'+nid); }catch(e){}
+    prog.textContent=''; msg.style.color='#1e6b34';
+    msg.textContent='✓ Queued '+recordings.length+' recording(s) as run #'+nid+'. The platform will run Suite2p + GCaMP analysis and write results back here.';
+    renderRuns();
+  }catch(err){ prog.textContent=''; msg.style.color='#9a2a2a'; msg.textContent='⚠ '+err.message; }
+  $('#submit').disabled=false;
+}
+
+async function renderRuns(){ if(!EXP||RUN_CAT==null){ $('#runs').textContent='Pick an experiment to see its analysis history.'; return; }
+  $('#runs').textContent='Loading…'; const res=await api('GET','/items?cat='+RUN_CAT+'&extended=1&limit=9999'); const items=Array.isArray(res.data)?res.data:[];
+  const mine=items.filter(it=>{ const e=flds(meta(it)); return String(fv(e,'Experiment ID'))===String(EXP.id) && fv(e,'Job type')==='Calcium (GCaMP)'; })
+    .sort((a,b)=>String(fv(flds(meta(b)),'Date submitted')).localeCompare(String(fv(flds(meta(a)),'Date submitted'))));
+  if(!mine.length){ $('#runs').innerHTML='<span class="muted">No calcium runs yet for this experiment.</span>'; return; }
+  const rows=mine.map(it=>{ const e=flds(meta(it)); const st=fv(e,'Status')||'Queued'; const done=/^done/i.test(st);
+    const result=esc(fv(e,'Metrics summary')||fv(e,'Result files')||fv(e,'Error')||'—');
+    return '<tr><td>'+esc(fv(e,'Date submitted')||'—')+'</td><td>'+esc(fv(e,'Submitted by')||'—')+'</td>'+
+      '<td><span class="badge b-'+esc(st.split(' ')[0])+'">'+esc(st)+'</span></td>'+
+      '<td class="sm">'+result+'</td>'+
+      '<td class="sm">'+(done?'<button class="btn sec sm" data-files="'+it.id+'">Files ▾</button>':'<span class="muted">—</span>')+
+      ' <a href="'+CONFIG.RECORD_VIEW_URL+it.id+'" target="_blank">open</a></td></tr>'+
+      '<tr id="fr-'+it.id+'" style="display:none"><td colspan="5"><div id="fm-'+it.id+'"></div></td></tr>'; }).join('');
+  $('#runs').innerHTML='<table><tr><th>Submitted</th><th>By</th><th>Status</th><th>Result</th><th>Files</th></tr>'+rows+'</table>';
+  $('#runs').querySelectorAll('[data-files]').forEach(b=>b.onclick=async()=>{
+    const rid=b.dataset.files, fr=$('#fr-'+rid), mt=$('#fm-'+rid);
+    if(fr.style.display==='none'){ fr.style.display=''; b.textContent='Files ▴';
+      if(!mt.dataset.loaded){ mt.dataset.loaded='1';
+        if(window.ElabResults) await ElabResults.mount({mount:mt, api, entity:'items', id:rid});
+        else mt.innerHTML='<span class="muted sm">File viewer didn’t load — reload the page.</span>'; }
+    } else { fr.style.display='none'; b.textContent='Files ▾'; } });
+}
+
+async function boot(){ const me=(await api('GET','/users/me')).data||{}; ME=me.fullname||((me.firstname||'')+' '+(me.lastname||'')).trim();
+  try{ const tl=(await api('GET','/items_types')).data||[]; RUN_TID=(tl.find(x=>(x.title||'').trim().toLowerCase()===CONFIG.RUNS_STORE.toLowerCase())||{}).id||null; DATA_TID=(tl.find(x=>(x.title||'').trim().toLowerCase()===CONFIG.DATA_STORE.toLowerCase())||{}).id||null; }catch(e){}
+  try{ const rc=(await api('GET','/teams/current/resources_categories')).data||[]; RUN_CAT=(rc.find(x=>(x.title||'').trim().toLowerCase()===CONFIG.RUNS_STORE.toLowerCase())||{}).id||null; DATA_CAT=(rc.find(x=>(x.title||'').trim().toLowerCase()===CONFIG.DATA_STORE.toLowerCase())||{}).id||null; }catch(e){}
+  if(!RUN_TID){ $('#loading').innerHTML='<b>Setup needed:</b> the "Analysis runs" store does not exist yet. Run elab_setup_analysis_runs.py, then reload.'; return; }
+  try{ const ex=(await api('GET','/experiments?limit=9999')).data; if(Array.isArray(ex)) EXPS=ex.map(e=>({id:e.id,title:e.title,status_title:e.status_title||''})); }catch(e){}
+  $('#s-date').value=today();
+  $('#exp-q').oninput=()=>renderExpPick($('#exp-q').value); $('#exp-q').onfocus=()=>renderExpPick($('#exp-q').value);
+  if($('#gc-showdone')) $('#gc-showdone').onchange=()=>renderExpPick($('#exp-q').value);
+  document.addEventListener('click',(e)=>{ if(!e.target.closest('#exp-q') && !e.target.closest('#exp-pick')){ const b=$('#exp-pick'); if(b) b.classList.add('hidden'); } });
+  $('#mv-files').onchange=rebuildRecs; $('#snap-files').onchange=rebuildRecs; $('#folder-files').onchange=rebuildRecs;
+  $('#s-date').onchange=()=>{ renderRecTable(); previewJob(); };
+  $('#prep').onchange=()=>{ updateHint(); renderRecTable(); previewJob(); }; updateHint();
+  $('#mv-clear').onclick=()=>{ $('#mv-files').value=''; $('#snap-files').value=''; $('#folder-files').value=''; RECS=[]; renderRecTable(); previewJob(); };
+  $('#apply-all').onclick=()=>{ if(RECS.length<2) return; const s=RECS[0].meta; RECS.forEach((r,i)=>{ if(i>0){ if(prep()==='invivo') r.meta.eye=s.eye; r.meta.region=s.region; r.meta.timepoint=s.timepoint; r.meta.treatment=s.treatment; } }); renderRecTable(); previewJob(); };
+  document.querySelectorAll('#p-profile,#p-fs,#p-cpmodel,#p-diam,#p-cellprob,#p-flow,#p-nch,#p-func,#a-model,#a-sensor,#a-group,#a-dry').forEach(el=>{ el.oninput=previewJob; el.onchange=previewJob; });
+  if($('#home-link'))$('#home-link').href=CONFIG.HOME_URL; $('#submit').onclick=submit; $('#loading').classList.add('hidden'); $('#app').classList.remove('hidden'); previewJob(); }
+(async function(){ try{ const r=await fetch(CONFIG.API+'/users/me',{headers:{Accept:'application/json'}}); if(r.ok){ const me=await r.json(); const ok=(me.teams||[]).some(t=>String(t.name||'').trim().toLowerCase()===CONFIG.TEAM_NAME.toLowerCase()); if(!ok){ document.body.innerHTML='<div style="max-width:620px;margin:14vh auto;padding:26px;font-family:system-ui"><h1 style="color:#7a2433;font-size:1.2rem">This tool is restricted</h1><p>Ask an administrator to add you to the '+esc(CONFIG.TEAM_NAME)+' team.</p></div>'; return; } } }catch(e){} boot().catch(e=>{ $('#loading').textContent='Failed to load: '+e; }); })();
+</script>
+</body>
+</html>
