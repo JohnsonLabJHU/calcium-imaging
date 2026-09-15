@@ -18,7 +18,7 @@ elab_analysis_worker.py so the live colocalization worker file is untouched.
 Env: ELAB_APIKEY, ELAB_BASE, SUITE2P_DIR (/opt/suite2p-johnsonlab), GCAMP_DIR (/opt/GCaMP-analysis),
      GCAMP_MODELS_DIR (/opt/gcamp-models: roi/<pair>/, spike/<pair>/, cellpose/<model>/), GCAMP_NJOBS.
 """
-import os, sys, json, re, subprocess, tempfile, zipfile
+import os, sys, json, re, subprocess, tempfile, zipfile, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +44,49 @@ def git_short(d):
 
 def safe(s):
     return re.sub(r"[^A-Za-z0-9._-]", "_", str(s)).strip("_")[:60] or "rec"
+
+
+PROGRESS_SECS = int(os.environ.get("GCAMP_PROGRESS_SECS", "45"))  # push a log tail this often while a stage runs
+
+
+def _tail(path, n=3500):
+    try:
+        with open(path, "r", errors="replace") as f:
+            return f.read()[-n:]
+    except Exception:
+        return ""
+
+
+def _run_streamed(cmd, cwd, env, run_id, label, timeout, header, logpath):
+    """Run a long child process, streaming its stdout to a file, and push the tail to the
+    run record every PROGRESS_SECS so a multi-hour Suite2p/GCaMP stage shows live progress
+    on the Analysis-runs tracker. Returns (returncode, full_output_text)."""
+    with open(logpath, "w") as f:
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT, text=True)
+        start = time.time()
+        while True:
+            try:
+                proc.wait(timeout=PROGRESS_SECS)
+            except subprocess.TimeoutExpired:
+                pass
+            elapsed = int(time.time() - start)
+            try:
+                w.set_fields(run_id, {"Status": "Running — %s" % label,
+                                      "Message / log": ("%s\n[%s | %dm elapsed]\n%s"
+                                                        % (header, label, elapsed // 60, _tail(logpath)))[-6000:]})
+            except Exception:
+                pass
+            if proc.poll() is not None:
+                break
+            if timeout and (time.time() - start) > timeout:
+                proc.kill()
+                break
+    rc = proc.returncode if proc.returncode is not None else -1
+    try:
+        out = open(logpath, "r", errors="replace").read()
+    except Exception:
+        out = ""
+    return rc, out
 
 
 def queued_gcamp():
@@ -86,7 +129,7 @@ def _write_batch_yaml(path, s2p, dry):
     if local_cp.exists():
         model_ref, hf = str(local_cp), "null"
     else:
-        model_ref, hf = model, (s2p.get("cellpose_hf_repo") or "YOUR-ORG/cellpose-retinal-models")
+        model_ref, hf = model, (s2p.get("cellpose_hf_repo") or os.environ.get("HF_CELLPOSE_REPO","YOUR-ORG/cellpose-retinal-models"))
     dv = s2p.get("diameter", None)
     # Cellpose wants a scalar diameter or None (auto) — a list triggers "'>' not supported: list vs int".
     diam_field = "null" if dv in (None, "",) else ("%s" % float(dv))
@@ -231,9 +274,10 @@ def process(run_item, ef):
             cmd = [sys.executable, "scripts/run_batch.py", "--root", str(root), "--config", str(batch_yaml)]
             if dry: cmd.append("--dry-run")
             print("[run %s] suite2p (still): %s" % (run_id, " ".join(cmd)))
-            p = subprocess.run(cmd, cwd=SUITE2P_DIR, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, timeout=TIMEOUT)
-            log.append("[suite2p still] rc=%s\n%s" % (p.returncode, (p.stdout or "")[-2500:]))
+            rc, out = _run_streamed(cmd, SUITE2P_DIR, env, run_id,
+                                    "Suite2p registration + Cellpose (%d recording(s))" % n_snap,
+                                    TIMEOUT, "\n".join(log), tmp / "suite2p_still.log")
+            log.append("[suite2p still] rc=%s\n%s" % (rc, out[-2500:]))
 
         # 3) no-snap recordings -> standard run_s2p
         profile_npy = str(Path(SUITE2P_DIR) / "config" / "settings_defaults" /
@@ -247,9 +291,10 @@ def process(run_item, ef):
                    "--functional_chan", str(s2p_cfg.get("functional_chan", 1))]
             envp = dict(env, PYTHONPATH=SUITE2P_DIR + os.pathsep + env.get("PYTHONPATH", ""))
             print("[run %s] suite2p (standard, no snap): %s" % (run_id, r["id"]))
-            p = subprocess.run(cmd, cwd=SUITE2P_DIR, env=envp, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, timeout=TIMEOUT)
-            log.append("[suite2p std %s] rc=%s\n%s" % (r["id"], p.returncode, (p.stdout or "")[-1200:]))
+            rc, out = _run_streamed(cmd, SUITE2P_DIR, envp, run_id,
+                                    "Suite2p (no snap): %s" % r["id"], TIMEOUT,
+                                    "\n".join(log), tmp / ("suite2p_std_%s.log" % safe(r["id"])))
+            log.append("[suite2p std %s] rc=%s\n%s" % (r["id"], rc, out[-1200:]))
 
         # verify suite2p outputs
         have = [r for r in recs if (r["_recdir"] / "suite2p" / "plane0" / "F.npy").is_file()]
@@ -267,8 +312,9 @@ def process(run_item, ef):
             cmd = [sys.executable, "-m", "gcamp_analysis", "analyze", str(root), "--config", str(pipe_yaml)]
             if analysis.get("sensor"): cmd += ["--sensor", str(analysis["sensor"])]
             print("[run %s] gcamp analyze: %s" % (run_id, " ".join(cmd)))
-            p = subprocess.run(cmd, cwd=GCAMP_DIR, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, timeout=TIMEOUT)
+            rc, out = _run_streamed(cmd, GCAMP_DIR, env, run_id, "GCaMP analysis (ROI/spike + grouping)",
+                                    TIMEOUT, "\n".join(log), tmp / "gcamp_analyze.log")
+            p = type("P", (), {"returncode": rc, "stdout": out})()
             log.append("[gcamp analyze] rc=%s\n%s" % (p.returncode, (p.stdout or "")[-3000:]))
             if p.returncode != 0:
                 w.set_fields(run_id, {"Status": "Failed", "Finished at": w.now_iso(),
@@ -306,6 +352,12 @@ def process(run_item, ef):
         if total_xlsx:
             w.upload_file("items", run_id, results_zip, comment="All GCaMP results (run %s)" % run_id, name=results_zip.name)
             uploaded.append(results_zip.name)
+        # attach the full Suite2p / GCaMP stage logs (the live "Message / log" only holds the tail)
+        for lf in sorted(tmp.glob("*.log")):
+            try:
+                w.upload_file("items", run_id, lf, comment="Run log (run %s)" % run_id, name=prefix + lf.name)
+            except Exception:
+                pass
 
         summary = "%d recording(s) analyzed (%d snap / %d no-snap); %d metrics workbook(s). Model pair: %s." % (
             len(have), n_snap, len(have) - n_snap, total_xlsx, pair)

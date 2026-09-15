@@ -268,7 +268,7 @@ def process(run_item, ef):
             uploaded.append(prefix + f.name)
 
         metrics = summarize(out_dir)
-        models = "cpdino (HuggingFace YOUR-ORG/cellpose-retinal-models)"
+        models = "cpdino (HuggingFace " + os.environ.get("HF_CELLPOSE_REPO","YOUR-ORG/cellpose-retinal-models") + ")"
         set_fields(run_id, {"Status": "Done", "Finished at": now_iso(),
                             "Result files": ", ".join(uploaded) or "(none)",
                             "Metrics summary": metrics,
