@@ -199,7 +199,7 @@ const flds=m=>(m.extra_fields)||{}; const fv=(e,n)=>{ const f=e&&e[n]; return f?
 const TEAMPERM=JSON.stringify({base:30,teams:[],teamgroups:[],users:[]});
 const numOrNull=v=>{ v=String(v==null?'':v).trim(); return v===''?null:(isNaN(+v)?null:+v); };
 const MOVIE_EXT=/\.(ome\.tif|tif|tiff|h5|hdf5|nd2|sbx|raw|bin)$/i;
-let ME='', RUN_TID=null, RUN_CAT=null, DATA_TID=null, DATA_CAT=null, EXPS=[], EXP=null, RECS=[], ARCHIVE=[], ARCH_SNAP={};
+let ME='', RUN_TID=null, RUN_CAT=null, DATA_TID=null, DATA_CAT=null, EXPS=[], EXP=null, RECS=[], ARCHIVE=[], ARCH_SNAP={}, RUNS_TIMER=null;
 
 function stemOf(name){ return String(name||'').replace(MOVIE_EXT,'').replace(/\.[^.]+$/,''); }
 function extOf(name){ const m=String(name||'').match(/\.([^.]+)$/); return m?m[1].toLowerCase():'tif'; }
@@ -431,15 +431,23 @@ async function renderRuns(){ if(!EXP||RUN_CAT==null){ $('#runs').textContent='Pi
   const mine=items.filter(it=>{ const e=flds(meta(it)); return String(fv(e,'Experiment ID'))===String(EXP.id) && fv(e,'Job type')==='Calcium (GCaMP)'; })
     .sort((a,b)=>String(fv(flds(meta(b)),'Date submitted')).localeCompare(String(fv(flds(meta(a)),'Date submitted'))));
   if(!mine.length){ $('#runs').innerHTML='<span class="muted">No calcium runs yet for this experiment.</span>'; return; }
+  let anyActive=false;
   const rows=mine.map(it=>{ const e=flds(meta(it)); const st=fv(e,'Status')||'Queued'; const done=/^done/i.test(st);
-    const result=esc(fv(e,'Metrics summary')||fv(e,'Result files')||fv(e,'Error')||'—');
+    const running=/^running/i.test(st); const queued=/^queued/i.test(st); if(running||queued) anyActive=true;
+    const logv=fv(e,'Message / log')||'';
+    const elapsed=(logv.match(/\d+m elapsed/g)||[]).slice(-1)[0]||'';
+    const lastLog=logv.trim().split('\n').filter(l=>l.trim()).slice(-1)[0]||'';
+    const result = running ? esc((elapsed?elapsed+' · ':'')+(lastLog||'working…')) : esc(fv(e,'Metrics summary')||fv(e,'Result files')||fv(e,'Error')||'—');
+    const badge = esc(st)+((running&&elapsed)?(' · '+esc(elapsed)):'');
     return '<tr><td>'+esc(fv(e,'Date submitted')||'—')+'</td><td>'+esc(fv(e,'Submitted by')||'—')+'</td>'+
-      '<td><span class="badge b-'+esc(st.split(' ')[0])+'">'+esc(st)+'</span></td>'+
+      '<td><span class="badge b-'+esc(st.split(' ')[0])+'">'+badge+'</span></td>'+
       '<td class="sm">'+result+'</td>'+
       '<td class="sm">'+(done?'<button class="btn sec sm" data-files="'+it.id+'">Files ▾</button>':'<span class="muted">—</span>')+
       ' <a href="'+CONFIG.RECORD_VIEW_URL+it.id+'" target="_blank">open</a></td></tr>'+
       '<tr id="fr-'+it.id+'" style="display:none"><td colspan="5"><div id="fm-'+it.id+'"></div></td></tr>'; }).join('');
-  $('#runs').innerHTML='<table><tr><th>Submitted</th><th>By</th><th>Status</th><th>Result</th><th>Files</th></tr>'+rows+'</table>';
+  $('#runs').innerHTML='<table><tr><th>Submitted</th><th>By</th><th>Status</th><th>Result / progress</th><th>Files</th></tr>'+rows+'</table>'
+    +(anyActive?'<div class="sm muted" style="margin-top:6px">⟳ A run is active — this list refreshes automatically every 30s.</div>':'');
+  clearTimeout(RUNS_TIMER); if(anyActive) RUNS_TIMER=setTimeout(renderRuns, 30000);
   $('#runs').querySelectorAll('[data-files]').forEach(b=>b.onclick=async()=>{
     const rid=b.dataset.files, fr=$('#fr-'+rid), mt=$('#fm-'+rid);
     if(fr.style.display==='none'){ fr.style.display=''; b.textContent='Files ▴';
